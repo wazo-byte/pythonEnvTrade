@@ -1,0 +1,23 @@
+tickers: [AAPL, MSFT, NVDA]
+data:
+  start: "2023-01-01"
+  end: null
+  cache_dir: data
+strategy:
+  ema_fast: 20
+  ema_slow: 50
+  rsi_period: 14
+  rsi_min: 45
+  rsi_max: 70
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+backtest:
+  initial_cash: 100000
+  fee_rate: 0.001
+  slippage_rate: 0.0005
+  max_position_fraction: 0.20
+  max_portfolio_exposure: 0.80
+  max_positions: 4
+  max_drawdown: 0.25
+  daily_loss_limit: 0.05

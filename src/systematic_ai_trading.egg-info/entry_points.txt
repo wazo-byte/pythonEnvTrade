@@ -1,0 +1,2 @@
+[console_scripts]
+trading-system = trading_system.main:main

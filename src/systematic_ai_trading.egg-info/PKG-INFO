@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: systematic-ai-trading
+Version: 0.1.0
+Summary: A small, deterministic trading research prototype.
+Requires-Python: >=3.11
+Requires-Dist: pandas>=2.2
+Requires-Dist: PyYAML>=6.0
+Requires-Dist: yfinance>=0.2.54
