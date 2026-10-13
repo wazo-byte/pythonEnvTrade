@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import pandas as pd
+from .config import fx_to_base_rate, instrument_details
 from .signals import classify
 
 
@@ -12,55 +13,62 @@ class PortfolioResult:
 
 
 def run_portfolio_backtest(datasets: dict[str, pd.DataFrame], settings: dict) -> PortfolioResult:
-    """Long-only daily portfolio simulator; close signals fill at the next shared session open."""
+    """Long-only daily portfolio simulator; each ticker trades only on its own sessions."""
     if not datasets:
         raise ValueError("At least one ticker dataset is required")
-    common_index = None
-    for ticker, data in datasets.items():
-        if data.empty:
-            raise ValueError(f"{ticker} has no data")
-        common_index = data.index if common_index is None else common_index.intersection(data.index)
-    if common_index is None or common_index.empty:
-        raise ValueError("Ticker datasets have no shared trading sessions")
+    if any(data.empty for data in datasets.values()):
+        raise ValueError("Ticker datasets cannot be empty")
 
     cfg, tickers = settings["backtest"], sorted(datasets)
+    instruments = {ticker: instrument_details(settings, ticker) for ticker in tickers}
+    fx_rates = {ticker: fx_to_base_rate(settings, instrument["currency"]) for ticker, instrument in instruments.items()}
+    sessions = sorted(set().union(*(data.index for data in datasets.values())))
     cash = float(cfg["initial_cash"])
     shares = {ticker: 0 for ticker in tickers}
     entry_cost = {ticker: 0.0 for ticker in tickers}
     pending = {ticker: None for ticker in tickers}
-    last_close = {ticker: float(datasets[ticker].loc[common_index[0], "Close"]) for ticker in tickers}
+    last_close = {ticker: None for ticker in tickers}
     trades, equity_rows, position_rows, risk_events = [], [], [], []
     peak = previous_close_equity = cash
 
-    for index_position, timestamp in enumerate(common_index):
-        rows = {ticker: datasets[ticker].loc[timestamp] for ticker in tickers}
-        if any(pd.isna(row["Open"]) or row["Open"] <= 0 for row in rows.values()):
-            risk_events.append(f"{timestamp}: invalid opening price; skipped executions")
-            continue
+    for timestamp in sessions:
+        rows = {ticker: data.loc[timestamp] for ticker, data in datasets.items() if timestamp in data.index}
         orders, pending = pending, {ticker: None for ticker in tickers}
 
-        # Next-bar execution: all sells from yesterday's close run before buys.
-        for ticker in tickers:
-            if orders[ticker] == "SELL" and shares[ticker]:
-                fill = float(rows[ticker]["Open"]) * (1 - cfg["slippage_rate"])
+        # A pending order waits until that ticker's next valid session; market holidays do not cancel it.
+        for ticker, action in orders.items():
+            row = rows.get(ticker)
+            if not action or row is None:
+                pending[ticker] = action
+                continue
+            open_price = float(row["Open"])
+            if pd.isna(open_price) or open_price <= 0:
+                risk_events.append(f"{timestamp}: {ticker} invalid opening price; order retained")
+                pending[ticker] = action
+                continue
+            if action == "SELL" and shares[ticker]:
+                fill = open_price * (1 - cfg["slippage_rate"])
                 fee = shares[ticker] * fill * cfg["fee_rate"]
-                proceeds = shares[ticker] * fill - fee
-                trades.append({"timestamp": timestamp, "ticker": ticker, "side": "SELL", "quantity": shares[ticker], "price": fill, "fee": fee, "pnl": proceeds - entry_cost[ticker]})
+                proceeds = (shares[ticker] * fill - fee) * fx_rates[ticker]
+                trades.append({"timestamp": timestamp, "ticker": ticker, "currency": instruments[ticker]["currency"], "side": "SELL", "quantity": shares[ticker], "price": fill, "fee": fee, "fee_base": fee * fx_rates[ticker], "pnl": proceeds - entry_cost[ticker]})
                 cash += proceeds
                 shares[ticker], entry_cost[ticker] = 0, 0.0
 
-        pre_open_equity = cash + sum(shares[ticker] * last_close[ticker] for ticker in tickers)
+        pre_open_equity = cash + sum(shares[ticker] * last_close[ticker] * fx_rates[ticker] for ticker in tickers if last_close[ticker] is not None)
         drawdown = 1 - pre_open_equity / peak if peak else 0
-        opening_exposure = sum(shares[ticker] * float(rows[ticker]["Open"]) for ticker in tickers)
-        for ticker in tickers:
-            if orders[ticker] != "BUY":
+        opening_exposure = sum(shares[ticker] * (float(rows[ticker]["Open"]) if ticker in rows else last_close[ticker]) * fx_rates[ticker] for ticker in tickers if last_close[ticker] is not None)
+        for ticker, action in orders.items():
+            row = rows.get(ticker)
+            if action != "BUY" or row is None:
+                continue
+            open_price = float(row["Open"])
+            if pd.isna(open_price) or open_price <= 0:
                 continue
             held_count = sum(quantity > 0 for quantity in shares.values())
-            fill = float(rows[ticker]["Open"]) * (1 + cfg["slippage_rate"])
-            position_budget = pre_open_equity * cfg["max_position_fraction"]
-            available_exposure = pre_open_equity * cfg["max_portfolio_exposure"] - opening_exposure
-            budget = min(position_budget, available_exposure, cash)
-            quantity = int(budget / (fill * (1 + cfg["fee_rate"])))
+            fill = open_price * (1 + cfg["slippage_rate"])
+            budget = min(pre_open_equity * cfg["max_position_fraction"], pre_open_equity * cfg["max_portfolio_exposure"] - opening_exposure, cash)
+            quantity = int(budget / (fill * (1 + cfg["fee_rate"]) * fx_rates[ticker]))
+            quantity -= quantity % instruments[ticker]["lot_size"]
             if drawdown >= cfg["max_drawdown"]:
                 risk_events.append(f"{timestamp}: {ticker} entry blocked by max drawdown")
             elif held_count >= cfg["max_positions"]:
@@ -69,22 +77,24 @@ def run_portfolio_backtest(datasets: dict[str, pd.DataFrame], settings: dict) ->
                 risk_events.append(f"{timestamp}: {ticker} entry blocked by cash or exposure")
             else:
                 fee = quantity * fill * cfg["fee_rate"]
-                cost = quantity * fill + fee
+                cost = (quantity * fill + fee) * fx_rates[ticker]
                 cash -= cost
                 shares[ticker], entry_cost[ticker] = quantity, cost
-                opening_exposure += quantity * float(rows[ticker]["Open"])
-                trades.append({"timestamp": timestamp, "ticker": ticker, "side": "BUY", "quantity": quantity, "price": fill, "fee": fee, "pnl": None})
+                opening_exposure += quantity * open_price * fx_rates[ticker]
+                trades.append({"timestamp": timestamp, "ticker": ticker, "currency": instruments[ticker]["currency"], "side": "BUY", "quantity": quantity, "price": fill, "fee": fee, "fee_base": fee * fx_rates[ticker], "pnl": None})
 
-        for ticker in tickers:
-            last_close[ticker] = float(rows[ticker]["Close"])
-        equity = cash + sum(shares[ticker] * last_close[ticker] for ticker in tickers)
+        for ticker, row in rows.items():
+            close_price = float(row["Close"])
+            if not pd.isna(close_price) and close_price > 0:
+                last_close[ticker] = close_price
+        equity = cash + sum(shares[ticker] * last_close[ticker] * fx_rates[ticker] for ticker in tickers if last_close[ticker] is not None)
         peak = max(peak, equity)
-        exposure_value = sum(shares[ticker] * last_close[ticker] for ticker in tickers)
+        exposure_value = sum(shares[ticker] * last_close[ticker] * fx_rates[ticker] for ticker in tickers if last_close[ticker] is not None)
         equity_rows.append({"timestamp": timestamp, "equity": equity, "cash": cash, "positions": sum(quantity > 0 for quantity in shares.values()), "exposure": exposure_value / equity if equity else 0})
         for ticker in tickers:
-            position_rows.append({"timestamp": timestamp, "ticker": ticker, "shares": shares[ticker], "market_value": shares[ticker] * last_close[ticker]})
+            market_value = shares[ticker] * (last_close[ticker] or 0)
+            position_rows.append({"timestamp": timestamp, "ticker": ticker, "currency": instruments[ticker]["currency"], "shares": shares[ticker], "market_value": market_value, "market_value_base": market_value * fx_rates[ticker]})
 
-        # Mark every open position at each close. A breach exits all holdings next open.
         daily_loss = 1 - equity / previous_close_equity if previous_close_equity else 0
         previous_close_equity = equity
         if daily_loss >= cfg["daily_loss_limit"]:
@@ -92,10 +102,8 @@ def run_portfolio_backtest(datasets: dict[str, pd.DataFrame], settings: dict) ->
             for ticker in tickers:
                 pending[ticker] = "SELL" if shares[ticker] else None
             continue
-        if index_position == len(common_index) - 1:
-            continue
-        for ticker in tickers:
-            signal, _ = classify(rows[ticker], settings)
-            pending[ticker] = "SELL" if shares[ticker] and signal != "BUY" else "BUY" if not shares[ticker] and signal == "BUY" else None
+        for ticker, row in rows.items():
+            signal, _ = classify(row, settings)
+            pending[ticker] = "SELL" if shares[ticker] and signal != "BUY" else "BUY" if not shares[ticker] and signal == "BUY" else pending[ticker]
 
     return PortfolioResult(pd.DataFrame(equity_rows).set_index("timestamp"), pd.DataFrame(position_rows), pd.DataFrame(trades), risk_events)
