@@ -11,7 +11,11 @@ def add_indicators(data: pd.DataFrame, settings: dict) -> pd.DataFrame:
     gains, losses = delta.clip(lower=0), -delta.clip(upper=0)
     average_gain = gains.ewm(alpha=1 / s["rsi_period"], adjust=False, min_periods=s["rsi_period"]).mean()
     average_loss = losses.ewm(alpha=1 / s["rsi_period"], adjust=False, min_periods=s["rsi_period"]).mean()
-    out["RSI14"] = 100 - (100 / (1 + average_gain / average_loss.replace(0, float("nan"))))
+    relative_strength = average_gain / average_loss.where(average_loss != 0, 1.0)
+    rsi = 100 - (100 / (1 + relative_strength))
+    rsi = rsi.mask((average_gain == 0) & (average_loss == 0), 50.0)
+    rsi = rsi.mask((average_loss == 0) & (average_gain > 0), 100.0)
+    out["RSI14"] = rsi
     fast = close.ewm(span=s["macd_fast"], adjust=False, min_periods=s["macd_slow"]).mean()
     slow = close.ewm(span=s["macd_slow"], adjust=False, min_periods=s["macd_slow"]).mean()
     out["MACD"] = fast - slow

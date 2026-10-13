@@ -13,3 +13,10 @@ def test_indicators_have_warmup_then_values():
     assert result["EMA20"].iloc[0] != result["EMA20"].iloc[0]
     assert result["EMA50"].notna().iloc[-1]
     assert result["MACDSignal"].notna().iloc[-1]
+
+
+def test_rsi_is_neutral_when_gain_and_loss_are_both_zero():
+    index = pd.date_range("2024-01-01", periods=5)
+    data = pd.DataFrame({"Open": [10] * 5, "High": [10] * 5, "Low": [10] * 5, "Close": [10] * 5, "Volume": [1] * 5}, index=index)
+    result = add_indicators(data, settings())
+    assert result["RSI14"].dropna().iloc[-1] == 50.0

@@ -13,15 +13,16 @@ python -m pytest
 python -m trading_system.main validate-data --ticker AAPL
 python -m trading_system.main scan
 python -m trading_system.main backtest --ticker AAPL
+python -m trading_system.main backtest --portfolio
 ```
 
-Reports appear in `reports/`: `scan.csv`, plus ticker-specific equity, trades, and performance CSVs. Downloaded data are cached under `data/` and ignored by Git. Edit `config/settings.yaml` to change tickers, date range, thresholds, costs, and limits.
+Reports appear in `reports/`: `scan.csv`, plus ticker-specific equity, trades, and performance CSVs. `backtest --portfolio` uses a shared cash balance for every configured ticker and saves aggregate equity, trade history, per-ticker daily positions, and a portfolio performance summary. Entries are processed in alphabetical ticker order after exits; this deterministic ordering determines allocation when cash or risk capacity is scarce. Downloaded data are cached under `data/` and ignored by Git. Edit `config/settings.yaml` to change tickers, date range, thresholds, costs, and limits.
 
 ## Model and execution boundaries
 
 The scanner is deliberately transparent: EMA20 > EMA50, RSI inside the configured range, and MACD > its signal line yields `BUY`; otherwise it yields `WATCH` (or `NO-SIGNAL` during warm-up). These are candidate research signals, not investment advice or evidence of profitability.
 
-Signals are evaluated at a bar's close and filled at the *next* bar's open with configurable slippage and fees. The daily-loss limit is evaluated on every daily close as `(previous close portfolio equity - current close marked portfolio equity) / previous close portfolio equity`; this reference includes cash plus any open position marked at the respective close. It resets each trading day. On a breach, no new entry is queued from that close and an open position is forced to exit at the next available bar's open using the normal slippage and fee model. This preserves next-bar execution and does not use future prices. The baseline is single-symbol and long-only, so it inherently permits at most one simultaneous position; multi-asset portfolio accounting is a future extension.
+Signals are evaluated at a bar's close and filled at the *next* bar's open with configurable slippage and fees. The daily-loss limit is evaluated on every daily close as `(previous close portfolio equity - current close marked portfolio equity) / previous close portfolio equity`; this reference includes cash plus any open position marked at the respective close. It resets each trading day. On a breach, no new entry is queued from that close and open positions are forced to exit at the next available bar's open using the normal slippage and fee model. This preserves next-bar execution and does not use future prices. Portfolio mode applies `max_position_fraction`, `max_portfolio_exposure`, and `max_positions` across its shared cash balance.
 
 `yfinance` is used only for exploratory historical data. Yahoo data availability, adjustment methodology, licensing/terms, timeliness, exchange coverage, and suitability for live trading must be verified independently before any production use. Public daily data are not treated as real-time or execution-grade. Missing/invalid price rows are dropped and reported; no prices are imputed.
 
@@ -33,4 +34,4 @@ For a broker integration, verify official Moomoo/Futu OpenAPI authentication, ma
 
 ## Limits
 
-The backtest has no corporate-action, survivorship-bias, trading-calendar, partial-fill, borrow, tax, or multi-asset accounting model. It is not investment advice. Use chronological train/validation/test splits and avoid parameter selection on the final test period.
+The backtest has no corporate-action, survivorship-bias, partial-fill, borrow, tax, or intraday model. Portfolio mode uses only the intersection of ticker trading sessions, so it is not suitable for mixing exchanges with different calendars yet. It is not investment advice. Use chronological train/validation/test splits and avoid parameter selection on the final test period.
