@@ -42,3 +42,6 @@ backtest:
 evaluation:
   train_fraction: 0.60
   validation_fraction: 0.20
+ml:
+  label_horizon: 5
+  ridge_alpha: 0.000001

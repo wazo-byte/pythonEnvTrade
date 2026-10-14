@@ -15,6 +15,8 @@ python -m trading_system.main scan
 python -m trading_system.main backtest --ticker AAPL
 python -m trading_system.main backtest --portfolio
 python -m trading_system.main backtest --ticker AAPL --walk-forward
+python -m trading_system.main prepare-features --ticker AAPL
+python -m trading_system.main model-benchmark --ticker AAPL
 ```
 
 Reports appear in `reports/`: `scan.csv`, plus ticker-specific equity, trades, performance, and risk-event CSVs. `backtest --portfolio` uses a shared cash balance for every configured ticker and saves aggregate equity, trade history, per-ticker daily positions, risk events, and a portfolio performance summary. Entries are processed in alphabetical ticker order after exits; this deterministic ordering determines allocation when cash or risk capacity is scarce. Downloaded data are cached under `data/` and ignored by Git. Edit `config/settings.yaml` to change tickers, date range, thresholds, costs, and limits.
@@ -22,6 +24,10 @@ Reports appear in `reports/`: `scan.csv`, plus ticker-specific equity, trades, p
 `config/settings.yaml` also maps instruments to markets. Market metadata supplies currency and lot size; the bundled US configuration uses USD/one-share lots, while the Bursa placeholder uses MYR/100-share lots. Portfolio values, transaction costs, and P&L are converted to `portfolio.base_currency`. Add a currency under `portfolio.fx_history` with its data ticker and an explicitly verified `invert` setting to use a timestamped FX close series; orders use the prior FX close so they do not use same-day FX closing data. Without a configured history, the fixed `fx_to_base` fallback remains in use. Prices and fees remain in the instrument's local currency in reports, with base-currency fields alongside them.
 
 `backtest --walk-forward` writes `<TICKER>_walk_forward.csv` with separate chronological train, validation, and final test-period results. The strategy settings stay fixed across all three reports: use validation only for a future model or parameter-selection decision, then treat the final test period as untouched.
+
+`prepare-features --ticker AAPL` writes `<TICKER>_features_5d.csv`, with decision-time indicators, a five-day future-return label, and chronological `train`, `validation`, or `test` split labels. The final unlabeled rows are excluded; do not shuffle the exported data before model evaluation.
+
+`model-benchmark --ticker AAPL` fits a small ridge-regression return model on the train split only, then exports validation/test predictions and directional-accuracy comparison with the rules baseline. It is a research benchmark, not an approved order source or a claim of profitability.
 
 ## Model and execution boundaries
 

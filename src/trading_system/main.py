@@ -6,16 +6,18 @@ import pandas as pd
 from .config import load_settings
 from .data import YFinanceProvider
 from .evaluation import walk_forward_baseline
+from .features import chronological_split, make_supervised_dataset
 from .indicators import add_indicators
 from .scanner import scan
 from .backtester import run_backtest
 from .metrics import performance, portfolio_performance
+from .model import run_model_benchmark
 from .portfolio import run_portfolio_backtest
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Research-only systematic trading prototype")
-    parser.add_argument("command", choices=["scan", "backtest", "validate-data"])
+    parser.add_argument("command", choices=["scan", "backtest", "validate-data", "prepare-features", "model-benchmark"])
     parser.add_argument("--config", default="config/settings.yaml")
     parser.add_argument("--ticker")
     parser.add_argument("--portfolio", action="store_true", help="backtest all configured tickers with shared capital")
@@ -50,6 +52,22 @@ def main() -> None:
     data, notes = YFinanceProvider(settings["data"]["cache_dir"]).history(ticker, settings["data"]["start"], settings["data"].get("end"))
     if args.command == "validate-data":
         print(f"{ticker}: {len(data)} valid daily bars; " + "; ".join(notes))
+        return
+    if args.command == "prepare-features":
+        horizon = settings.get("ml", {}).get("label_horizon", 5)
+        features, labels = make_supervised_dataset(add_indicators(data, settings), horizon)
+        splits = chronological_split(features, labels, settings["evaluation"]["train_fraction"], settings["evaluation"]["validation_fraction"])
+        report = pd.concat([frame.assign(split=name).join(target) for name, (frame, target) in splits.items()])
+        report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
+        report.to_csv(report_dir / f"{ticker}_features_{horizon}d.csv", index_label="timestamp")
+        print(f"{ticker}: exported {len(report)} labelled rows to {report_dir / f'{ticker}_features_{horizon}d.csv'}")
+        return
+    if args.command == "model-benchmark":
+        report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
+        summary, predictions = run_model_benchmark(add_indicators(data, settings), settings)
+        summary.to_csv(report_dir / f"{ticker}_model_benchmark.csv", index=False)
+        predictions.to_csv(report_dir / f"{ticker}_model_predictions.csv", index_label="timestamp")
+        print(summary.to_string(index=False))
         return
     if args.walk_forward:
         report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
