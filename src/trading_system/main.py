@@ -28,17 +28,21 @@ def main() -> None:
         print(scan(settings).to_string(index=False))
         return
     if args.command == "backtest" and args.portfolio:
+        provider = YFinanceProvider(settings["data"]["cache_dir"])
         datasets = {}
         for ticker in settings["tickers"]:
-            data, _ = YFinanceProvider(settings["data"]["cache_dir"]).history(ticker, settings["data"]["start"], settings["data"].get("end"))
+            data, _ = provider.history(ticker, settings["data"]["start"], settings["data"].get("end"))
             datasets[ticker] = add_indicators(data, settings)
-        result = run_portfolio_backtest(datasets, settings)
+        fx_history = {}
+        for currency, source in settings.get("portfolio", {}).get("fx_history", {}).items():
+            fx_history[currency] = provider.history(source["ticker"], settings["data"]["start"], settings["data"].get("end"))[0]
+        result = run_portfolio_backtest(datasets, settings, fx_history)
         report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
         result.equity.to_csv(report_dir / "portfolio_equity.csv")
         result.positions.to_csv(report_dir / "portfolio_positions.csv", index=False)
         result.trades.to_csv(report_dir / "portfolio_trades.csv", index=False)
         pd.DataFrame({"event": result.risk_events}).to_csv(report_dir / "portfolio_risk_events.csv", index=False)
-        summary = portfolio_performance(result, datasets, settings["backtest"]["initial_cash"])
+        summary = portfolio_performance(result, datasets, settings["backtest"]["initial_cash"], settings, fx_history)
         pd.DataFrame([summary]).to_csv(report_dir / "portfolio_performance.csv", index=False)
         print(pd.Series(summary).to_string())
         return

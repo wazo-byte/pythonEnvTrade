@@ -18,7 +18,7 @@ def instrument_details(settings: dict, ticker: str) -> dict:
 
 
 def fx_to_base_rate(settings: dict, currency: str) -> float:
-    # shortcut: rates are fixed, replace with timestamped FX data before performance analysis.
+    # shortcut: used only without a configured FX history, replace before performance analysis.
     portfolio = settings.get("portfolio", {})
     base_currency = portfolio.get("base_currency", "USD")
     if currency == base_currency:

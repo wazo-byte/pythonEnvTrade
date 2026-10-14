@@ -1,5 +1,7 @@
 import pandas as pd
 from .backtester import BacktestResult
+from .config import instrument_details
+from .fx import fx_rate_series
 from .portfolio import PortfolioResult
 
 
@@ -15,10 +17,17 @@ def performance(result: BacktestResult, data: pd.DataFrame, initial_cash: float)
     return {"total_return": total_return, "buy_hold_return": benchmark, "max_drawdown": drawdown.min(), "trade_count": len(trades), "win_rate": winners / len(sells) if len(sells) else None, "profit_factor": gains / losses if losses else None, "time_in_market": float((equity["shares"] > 0).mean()), "fees_paid": float(trades["fee"].sum()) if not trades.empty else 0.0, "rejected_entries": len(result.rejected_entries)}
 
 
-def portfolio_performance(result: PortfolioResult, datasets: dict[str, pd.DataFrame], initial_cash: float) -> dict:
+def portfolio_performance(result: PortfolioResult, datasets: dict[str, pd.DataFrame], initial_cash: float, settings: dict, fx_history: dict[str, pd.DataFrame] | None = None) -> dict:
     equity, trades = result.equity, result.trades
     total_return = equity["equity"].iloc[-1] / initial_cash - 1
-    benchmark = pd.concat([data["Close"].div(data["Close"].iloc[0]).sub(1).reindex(equity.index).ffill() for data in datasets.values()], axis=1).mean(axis=1).iloc[-1]
+    fx_history = fx_history or {}
+    benchmark_returns = []
+    for ticker, data in datasets.items():
+        currency = instrument_details(settings, ticker)["currency"]
+        _, valuation_fx = fx_rate_series(settings, currency, list(equity.index), fx_history.get(currency))
+        value = data["Close"].reindex(equity.index).ffill() * valuation_fx
+        benchmark_returns.append(value.div(value.dropna().iloc[0]).sub(1))
+    benchmark = pd.concat(benchmark_returns, axis=1).mean(axis=1).iloc[-1]
     drawdown = equity["equity"] / equity["equity"].cummax() - 1
     sells = trades[trades["side"] == "SELL"] if not trades.empty else trades
     winners = sells["pnl"].gt(0).sum() if not sells.empty else 0
