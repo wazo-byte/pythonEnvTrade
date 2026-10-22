@@ -17,6 +17,10 @@ python -m trading_system.main backtest --portfolio
 python -m trading_system.main backtest --ticker AAPL --walk-forward
 python -m trading_system.main prepare-features --ticker AAPL
 python -m trading_system.main model-benchmark --ticker AAPL
+python -m trading_system.main model-backtest --ticker AAPL
+python -m trading_system.main trade-plan --budget 1000 --currency USD --target-return 0.05 --max-loss 0.02 --holding-days 10 --market US
+python -m trading_system.main journal-close --journal-id PLAN-EXAMPLE --actual-entry 100 --actual-exit 105 --mae -0.02 --mfe 0.06 --notes "manual review"
+streamlit run src/trading_system/dashboard.py
 ```
 
 Reports appear in `reports/`: `scan.csv`, plus ticker-specific equity, trades, performance, and risk-event CSVs. `backtest --portfolio` uses a shared cash balance for every configured ticker and saves aggregate equity, trade history, per-ticker daily positions, risk events, and a portfolio performance summary. Entries are processed in alphabetical ticker order after exits; this deterministic ordering determines allocation when cash or risk capacity is scarce. Downloaded data are cached under `data/` and ignored by Git. Edit `config/settings.yaml` to change tickers, date range, thresholds, costs, and limits.
@@ -28,6 +32,14 @@ Reports appear in `reports/`: `scan.csv`, plus ticker-specific equity, trades, p
 `prepare-features --ticker AAPL` writes `<TICKER>_features_5d.csv`, with decision-time indicators, a five-day future-return label, and chronological `train`, `validation`, or `test` split labels. The final unlabeled rows are excluded; do not shuffle the exported data before model evaluation.
 
 `model-benchmark --ticker AAPL` fits a small ridge-regression return model on the train split only, then exports validation/test predictions and directional-accuracy comparison with the rules baseline. It is a research benchmark, not an approved order source or a claim of profitability.
+
+`model-backtest --ticker AAPL` applies the same train-only model and the rules baseline to separate validation/test periods using identical next-bar fills, fees, slippage, and risk controls. It exports comparative summaries, trades, and equity curves; only a persistent test-period advantage after costs would justify further research.
+
+`trade-plan` turns explicit budget, return, loss, holding-period, and market constraints into ranked `TAKE` or `AVOID` candidates. It writes `trade_plan.csv` and appends every recommendation to `trade_journal.csv`. A requested return is a constraint: a candidate is avoided when the requested target is not supported by its recent volatility or cannot satisfy minimum risk/reward and lot-size rules. Setup scores also show whether current volume is at least the configured 20-day average and whether the configured market benchmark is bullish; these are explanatory inputs, not guarantees. Trade plans are research recommendations, never submitted orders.
+
+`journal-close` manually reconciles a journal entry with actual entry/exit prices plus optional MAE, MFE, and review notes. It calculates actual return and win/loss for later performance analysis; it does not query or submit anything to a broker. On first write, older mixed journal layouts are normalized to the current columns and the original is retained as `trade_journal.csv.bak`.
+
+`dashboard.py` provides the same research workflow in a local browser: enter plan constraints, generate ranked suggestions, inspect entry/target/stop/reasons, and close a journal record with outcome notes. Generating a plan refreshes the Yahoo-backed daily data and displays the latest available bar date. It is not a live or execution-grade feed. It only calls the local research modules and has no order-submission path. The close form takes MAE and MFE as percentages: MAE is the worst move from actual entry during the trade (for example `-2.00`), while MFE is the best move (for example `6.00`). The journal stores them as decimals (`-0.02` and `0.06`).
 
 ## Model and execution boundaries
 

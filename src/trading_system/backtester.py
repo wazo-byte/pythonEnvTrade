@@ -10,7 +10,7 @@ class BacktestResult:
     rejected_entries: list[str]
 
 
-def run_backtest(data: pd.DataFrame, settings: dict) -> BacktestResult:
+def run_backtest(data: pd.DataFrame, settings: dict, signal_overrides: pd.Series | None = None) -> BacktestResult:
     """Long-only, one-symbol close-to-next-open simulation; signals never trade on their own bar."""
     cfg = settings["backtest"]
     cash, shares, entry_cost = float(cfg["initial_cash"]), 0, 0.0
@@ -58,6 +58,6 @@ def run_backtest(data: pd.DataFrame, settings: dict) -> BacktestResult:
             pending = "SELL" if shares else None
         # Otherwise, a close decision is queued for the next bar only.
         elif i < len(data) - 1:
-            signal, _ = classify(row, settings)
+            signal = signal_overrides.get(timestamp, "WATCH") if signal_overrides is not None else classify(row, settings)[0]
             pending = "BUY" if signal == "BUY" and not shares else "SELL" if signal != "BUY" and shares else None
     return BacktestResult(pd.DataFrame(equity_rows).set_index("timestamp"), pd.DataFrame(trades), rejects)

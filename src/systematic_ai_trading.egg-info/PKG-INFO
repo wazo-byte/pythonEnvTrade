@@ -6,3 +6,4 @@ Requires-Python: >=3.11
 Requires-Dist: pandas>=2.2
 Requires-Dist: PyYAML>=6.0
 Requires-Dist: yfinance>=0.2.54
+Requires-Dist: streamlit>=1.42

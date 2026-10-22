@@ -45,3 +45,11 @@ evaluation:
 ml:
   label_horizon: 5
   ridge_alpha: 0.000001
+trade_plan:
+  max_allocation_fraction: 0.80
+  minimum_risk_reward: 1.5
+  max_target_to_expected_move: 1.25
+  minimum_volume_ratio: 1.0
+market_regime:
+  tickers:
+    US: SPY

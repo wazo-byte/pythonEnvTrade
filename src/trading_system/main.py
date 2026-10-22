@@ -11,23 +11,65 @@ from .indicators import add_indicators
 from .scanner import scan
 from .backtester import run_backtest
 from .metrics import performance, portfolio_performance
-from .model import run_model_benchmark
+from .model import run_model_backtests, run_model_benchmark
 from .portfolio import run_portfolio_backtest
+from .regime import classify_market_regime
+from .trade_plan import append_trade_journal, build_trade_plans, close_trade_journal_entry
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Research-only systematic trading prototype")
-    parser.add_argument("command", choices=["scan", "backtest", "validate-data", "prepare-features", "model-benchmark"])
+    parser.add_argument("command", choices=["scan", "backtest", "validate-data", "prepare-features", "model-benchmark", "model-backtest", "trade-plan", "journal-close"])
     parser.add_argument("--config", default="config/settings.yaml")
     parser.add_argument("--ticker")
     parser.add_argument("--portfolio", action="store_true", help="backtest all configured tickers with shared capital")
     parser.add_argument("--walk-forward", action="store_true", help="write chronological train/validation/test baseline results")
+    parser.add_argument("--budget", type=float, help="available capital for a trade plan")
+    parser.add_argument("--currency", help="budget currency, for example USD or MYR")
+    parser.add_argument("--target-return", type=float, help="target return as a decimal, for example 0.05")
+    parser.add_argument("--max-loss", type=float, help="maximum loss as a decimal, for example 0.02")
+    parser.add_argument("--holding-days", type=int, default=10, help="expected holding period in trading days")
+    parser.add_argument("--market", choices=["US", "BURSA", "BOTH"], help="market to screen for a trade plan")
+    parser.add_argument("--journal-id", help="recommendation ID to close in the trade journal")
+    parser.add_argument("--actual-entry", type=float, help="actual entry price for journal reconciliation")
+    parser.add_argument("--actual-exit", type=float, help="actual exit price for journal reconciliation")
+    parser.add_argument("--mae", type=float, help="maximum adverse excursion as a decimal")
+    parser.add_argument("--mfe", type=float, help="maximum favourable excursion as a decimal")
+    parser.add_argument("--notes", help="manual outcome/review notes")
     args = parser.parse_args()
     if args.portfolio and args.walk_forward:
         parser.error("--portfolio and --walk-forward cannot be combined")
     settings = load_settings(args.config)
     if args.command == "scan":
         print(scan(settings).to_string(index=False))
+        return
+    if args.command == "journal-close":
+        if None in (args.journal_id, args.actual_entry, args.actual_exit):
+            parser.error("journal-close requires --journal-id --actual-entry --actual-exit")
+        try:
+            close_trade_journal_entry(Path("reports") / "trade_journal.csv", args.journal_id, args.actual_entry, args.actual_exit, args.mae, args.mfe, args.notes)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"{args.journal_id}: journal entry closed")
+        return
+    if args.command == "trade-plan":
+        if None in (args.budget, args.currency, args.target_return, args.max_loss, args.market):
+            parser.error("trade-plan requires --budget --currency --target-return --max-loss --market")
+        provider = YFinanceProvider(settings["data"]["cache_dir"])
+        datasets = {}
+        for plan_ticker in settings["tickers"]:
+            plan_data, _ = provider.history(plan_ticker, settings["data"]["start"], settings["data"].get("end"))
+            datasets[plan_ticker] = add_indicators(plan_data, settings)
+        regimes = {}
+        for plan_market, benchmark in settings.get("market_regime", {}).get("tickers", {}).items():
+            if args.market in (plan_market, "BOTH"):
+                regime_data, _ = provider.history(benchmark, settings["data"]["start"], settings["data"].get("end"))
+                regimes[plan_market] = classify_market_regime(add_indicators(regime_data, settings))
+        plans = build_trade_plans(datasets, settings, args.budget, args.currency, args.target_return, args.max_loss, args.holding_days, args.market, regimes)
+        report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
+        plans.to_csv(report_dir / "trade_plan.csv", index=False)
+        append_trade_journal(plans, report_dir / "trade_journal.csv")
+        print(plans.to_string(index=False))
         return
     if args.command == "backtest" and args.portfolio:
         provider = YFinanceProvider(settings["data"]["cache_dir"])
@@ -67,6 +109,14 @@ def main() -> None:
         summary, predictions = run_model_benchmark(add_indicators(data, settings), settings)
         summary.to_csv(report_dir / f"{ticker}_model_benchmark.csv", index=False)
         predictions.to_csv(report_dir / f"{ticker}_model_predictions.csv", index_label="timestamp")
+        print(summary.to_string(index=False))
+        return
+    if args.command == "model-backtest":
+        report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
+        summary, trades, equity = run_model_backtests(add_indicators(data, settings), settings)
+        summary.to_csv(report_dir / f"{ticker}_model_backtest.csv", index=False)
+        trades.to_csv(report_dir / f"{ticker}_model_backtest_trades.csv", index=False)
+        equity.to_csv(report_dir / f"{ticker}_model_backtest_equity.csv", index=False)
         print(summary.to_string(index=False))
         return
     if args.walk_forward:

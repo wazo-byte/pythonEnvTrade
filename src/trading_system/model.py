@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from .features import chronological_split, make_supervised_dataset
+from .backtester import run_backtest
+from .metrics import performance
 from .signals import classify
 
 
@@ -45,3 +47,25 @@ def run_model_benchmark(data: pd.DataFrame, settings: dict) -> tuple[pd.DataFram
         summaries.append({"split": name, "rows": len(actual), "mae": (predicted - actual).abs().mean(), "model_directional_accuracy": (model_up == actual_up).mean(), "rule_directional_accuracy": (rule_up == actual_up).mean()})
         predictions.append(pd.DataFrame({"split": name, "actual_return": actual, "predicted_return": predicted, "model_up": model_up, "rule_up": rule_up}))
     return pd.DataFrame(summaries), pd.concat(predictions)
+
+
+def run_model_backtests(data: pd.DataFrame, settings: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Compare train-only model signals with rules under identical costs on held-out periods."""
+    horizon = settings.get("ml", {}).get("label_horizon", 5)
+    features, labels = make_supervised_dataset(data, horizon)
+    splits = chronological_split(features, labels, settings["evaluation"]["train_fraction"], settings["evaluation"]["validation_fraction"])
+    model = RidgeReturnModel(float(settings.get("ml", {}).get("ridge_alpha", 1e-6))).fit(*splits["train"])
+    summaries, trades, equity = [], [], []
+    for name in ("validation", "test"):
+        split_features, _ = splits[name]
+        period = data.loc[split_features.index]
+        model_signals = model.predict(split_features).map(lambda value: "BUY" if value > 0 else "WATCH")
+        model_result = run_backtest(period, settings, model_signals)
+        rule_result = run_backtest(period, settings)
+        model_metrics = performance(model_result, period, settings["backtest"]["initial_cash"])
+        rule_metrics = performance(rule_result, period, settings["backtest"]["initial_cash"])
+        summaries.append({"split": name, "bars": len(period), "model_total_return": model_metrics["total_return"], "rule_total_return": rule_metrics["total_return"], "buy_hold_return": model_metrics["buy_hold_return"], "model_max_drawdown": model_metrics["max_drawdown"], "rule_max_drawdown": rule_metrics["max_drawdown"], "model_fees_paid": model_metrics["fees_paid"], "rule_fees_paid": rule_metrics["fees_paid"]})
+        for strategy, result in (("model", model_result), ("rule", rule_result)):
+            trades.append(result.trades.assign(split=name, strategy=strategy))
+            equity.append(result.equity.assign(split=name, strategy=strategy))
+    return pd.DataFrame(summaries), pd.concat(trades, ignore_index=True), pd.concat(equity).reset_index(names="timestamp")

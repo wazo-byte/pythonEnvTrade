@@ -16,4 +16,4 @@ def classify(row: pd.Series, settings: dict) -> tuple[str, str]:
 def latest_signal(ticker: str, data: pd.DataFrame, settings: dict, validation: list[str]) -> dict:
     row = data.iloc[-1]
     signal, explanation = classify(row, settings)
-    return {"ticker": ticker, "timestamp": data.index[-1].isoformat(), "latest_price": row["Close"], "ema20": row["EMA20"], "ema50": row["EMA50"], "rsi14": row["RSI14"], "macd": row["MACD"], "macd_signal": row["MACDSignal"], "signal": signal, "explanation": explanation, "data_status": "; ".join(validation) or "valid"}
+    return {"ticker": ticker, "timestamp": data.index[-1].isoformat(), "latest_price": row["Close"], "ema20": row["EMA20"], "ema50": row["EMA50"], "rsi14": row["RSI14"], "macd": row["MACD"], "macd_signal": row["MACDSignal"], "volume_ratio20": row["VolumeRatio20"], "signal": signal, "explanation": explanation, "data_status": "; ".join(validation) or "valid"}

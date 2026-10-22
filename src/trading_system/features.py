@@ -1,7 +1,7 @@
 """Feature and label preparation for future supervised-model experiments."""
 import pandas as pd
 
-FEATURE_COLUMNS = ["EMA20", "EMA50", "RSI14", "MACD", "MACDSignal", "MACDHistogram", "Volatility20"]
+FEATURE_COLUMNS = ["EMA20", "EMA50", "RSI14", "MACD", "MACDSignal", "MACDHistogram", "Volatility20", "VolumeRatio20"]
 
 
 def make_supervised_dataset(data: pd.DataFrame, horizon: int = 5) -> tuple[pd.DataFrame, pd.Series]:

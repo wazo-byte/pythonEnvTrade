@@ -22,4 +22,5 @@ def add_indicators(data: pd.DataFrame, settings: dict) -> pd.DataFrame:
     out["MACDSignal"] = out["MACD"].ewm(span=s["macd_signal"], adjust=False, min_periods=s["macd_signal"]).mean()
     out["MACDHistogram"] = out["MACD"] - out["MACDSignal"]
     out["Volatility20"] = close.pct_change().rolling(20, min_periods=20).std() * (252**0.5)
+    out["VolumeRatio20"] = out["Volume"] / out["Volume"].rolling(20, min_periods=20).mean()
     return out

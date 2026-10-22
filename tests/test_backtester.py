@@ -34,3 +34,11 @@ def test_daily_loss_non_breach_keeps_position_open():
     result = run_backtest(data, settings)
     assert len(result.trades) == 1
     assert not result.rejected_entries
+
+
+def test_signal_override_still_fills_on_next_bar():
+    index = pd.date_range("2024-01-01", periods=3)
+    data = pd.DataFrame({"Open": [10, 11, 12], "Close": [10, 11, 12], "EMA20": [9]*3, "EMA50": [10]*3, "RSI14": [90]*3, "MACD": [-1]*3, "MACDSignal": [0]*3}, index=index)
+    settings = {"strategy": {"rsi_min": 40, "rsi_max": 60}, "backtest": {"initial_cash": 1000, "fee_rate": 0, "slippage_rate": 0, "max_position_fraction": .5, "max_portfolio_exposure": .8, "max_positions": 1, "max_drawdown": .9, "daily_loss_limit": .5}}
+    result = run_backtest(data, settings, pd.Series(["BUY", "WATCH", "WATCH"], index=index))
+    assert result.trades.iloc[0]["timestamp"] == index[1]
