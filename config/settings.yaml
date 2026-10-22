@@ -10,6 +10,7 @@ instruments:
   AAPL: {market: US}
   MSFT: {market: US}
   NVDA: {market: US}
+  MAYBANK: {market: BURSA, provider_symbol: "1155", historical_symbol: "1155.KL"}
 portfolio:
   base_currency: USD
   # Fixed research conversion rates, quoted as base-currency units per local unit.
@@ -21,6 +22,9 @@ data:
   start: "2023-01-01"
   end: null
   cache_dir: data
+  live_providers:
+    US: finnhub
+    BURSA: itick
 strategy:
   ema_fast: 20
   ema_slow: 50

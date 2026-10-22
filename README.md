@@ -49,6 +49,8 @@ Signals are evaluated at a bar's close and filled at the *next* bar's open with 
 
 `yfinance` is used only for exploratory historical data. Yahoo data availability, adjustment methodology, licensing/terms, timeliness, exchange coverage, and suitability for live trading must be verified independently before any production use. Public daily data are not treated as real-time or execution-grade. Missing/invalid price rows are dropped and reported; no prices are imputed.
 
+For optional live quotes, set `FINNHUB_API_KEY` (US) or `ITICK_API_KEY` (Bursa) in the environment, then run `python -m trading_system.main live-quote --ticker AAPL` or `python -m trading_system.main live-quote --ticker MAYBANK`. `market-status --market US` and `market-status --market BURSA` use the same provider boundary. A missing key, missing entitlement, or provider failure is an error; the command never falls back to Yahoo. iTick freshness depends on its returned data-age header and account entitlement, so it is displayed rather than assumed real-time.
+
 ## AI and broker roadmap
 
 Keep feature generation (`indicators.py`), signal generation (`signals.py`), data access, and execution simulation separate. `features.py` now provides `make_supervised_dataset`, which deliberately removes the final rows whose forward-return labels are unknown, and `chronological_split`, which makes 60/20/20 train/validation/test slices without shuffling. A future model should train only on the train slice, select parameters on validation, and report the held-out test comparison against this baseline. Never allow an LLM unrestricted trade execution.

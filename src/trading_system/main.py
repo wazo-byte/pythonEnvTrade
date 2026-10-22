@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from .config import load_settings
-from .data import YFinanceProvider
+from .data import MarketDataGateway
 from .evaluation import walk_forward_baseline
 from .features import chronological_split, make_supervised_dataset
 from .indicators import add_indicators
@@ -19,7 +19,7 @@ from .trade_plan import append_trade_journal, build_trade_plans, close_trade_jou
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Research-only systematic trading prototype")
-    parser.add_argument("command", choices=["scan", "backtest", "validate-data", "prepare-features", "model-benchmark", "model-backtest", "trade-plan", "journal-close"])
+    parser.add_argument("command", choices=["scan", "backtest", "validate-data", "prepare-features", "model-benchmark", "model-backtest", "trade-plan", "journal-close", "live-quote", "market-status"])
     parser.add_argument("--config", default="config/settings.yaml")
     parser.add_argument("--ticker")
     parser.add_argument("--portfolio", action="store_true", help="backtest all configured tickers with shared capital")
@@ -40,6 +40,22 @@ def main() -> None:
     if args.portfolio and args.walk_forward:
         parser.error("--portfolio and --walk-forward cannot be combined")
     settings = load_settings(args.config)
+    if args.command == "live-quote":
+        if not args.ticker:
+            parser.error("live-quote requires --ticker")
+        try:
+            print(MarketDataGateway(settings).get_live_quote(args.ticker))
+        except (RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+        return
+    if args.command == "market-status":
+        if not args.market or args.market == "BOTH":
+            parser.error("market-status requires --market US or BURSA")
+        try:
+            print(MarketDataGateway(settings).get_market_status(args.market))
+        except (RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+        return
     if args.command == "scan":
         print(scan(settings).to_string(index=False))
         return
@@ -55,15 +71,15 @@ def main() -> None:
     if args.command == "trade-plan":
         if None in (args.budget, args.currency, args.target_return, args.max_loss, args.market):
             parser.error("trade-plan requires --budget --currency --target-return --max-loss --market")
-        provider = YFinanceProvider(settings["data"]["cache_dir"])
+        provider = MarketDataGateway(settings)
         datasets = {}
         for plan_ticker in settings["tickers"]:
-            plan_data, _ = provider.history(plan_ticker, settings["data"]["start"], settings["data"].get("end"))
+            plan_data, _ = provider.get_historical(plan_ticker, settings["data"]["start"], settings["data"].get("end"))
             datasets[plan_ticker] = add_indicators(plan_data, settings)
         regimes = {}
         for plan_market, benchmark in settings.get("market_regime", {}).get("tickers", {}).items():
             if args.market in (plan_market, "BOTH"):
-                regime_data, _ = provider.history(benchmark, settings["data"]["start"], settings["data"].get("end"))
+                regime_data, _ = provider.get_historical(benchmark, settings["data"]["start"], settings["data"].get("end"))
                 regimes[plan_market] = classify_market_regime(add_indicators(regime_data, settings))
         plans = build_trade_plans(datasets, settings, args.budget, args.currency, args.target_return, args.max_loss, args.holding_days, args.market, regimes)
         report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
@@ -72,14 +88,14 @@ def main() -> None:
         print(plans.to_string(index=False))
         return
     if args.command == "backtest" and args.portfolio:
-        provider = YFinanceProvider(settings["data"]["cache_dir"])
+        provider = MarketDataGateway(settings)
         datasets = {}
         for ticker in settings["tickers"]:
-            data, _ = provider.history(ticker, settings["data"]["start"], settings["data"].get("end"))
+            data, _ = provider.get_historical(ticker, settings["data"]["start"], settings["data"].get("end"))
             datasets[ticker] = add_indicators(data, settings)
         fx_history = {}
         for currency, source in settings.get("portfolio", {}).get("fx_history", {}).items():
-            fx_history[currency] = provider.history(source["ticker"], settings["data"]["start"], settings["data"].get("end"))[0]
+            fx_history[currency] = provider.get_historical(source["ticker"], settings["data"]["start"], settings["data"].get("end"))[0]
         result = run_portfolio_backtest(datasets, settings, fx_history)
         report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
         result.equity.to_csv(report_dir / "portfolio_equity.csv")
@@ -91,7 +107,7 @@ def main() -> None:
         print(pd.Series(summary).to_string())
         return
     ticker = args.ticker or settings["tickers"][0]
-    data, notes = YFinanceProvider(settings["data"]["cache_dir"]).history(ticker, settings["data"]["start"], settings["data"].get("end"))
+    data, notes = MarketDataGateway(settings).get_historical(ticker, settings["data"]["start"], settings["data"].get("end"))
     if args.command == "validate-data":
         print(f"{ticker}: {len(data)} valid daily bars; " + "; ".join(notes))
         return

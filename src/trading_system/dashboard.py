@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from trading_system.config import load_settings
-from trading_system.data import YFinanceProvider
+from trading_system.data import MarketDataGateway, live_market_snapshot
 from trading_system.indicators import add_indicators
 from trading_system.regime import classify_market_regime
 from trading_system.trade_plan import _load_trade_journal, append_trade_journal, build_trade_plans, close_trade_journal_entry
@@ -16,15 +16,15 @@ JOURNAL_PATH = REPORTS / "trade_journal.csv"
 
 
 def _plans(settings: dict, budget: float, currency: str, target_return: float, max_loss: float, holding_days: int, market: str) -> pd.DataFrame:
-    provider = YFinanceProvider(settings["data"]["cache_dir"])
+    provider = MarketDataGateway(settings)
     data_by_ticker = {}
     for ticker in settings["tickers"]:
-        data, _ = provider.history(ticker, settings["data"]["start"], settings["data"].get("end"), refresh=True)
+        data, _ = provider.get_historical(ticker, settings["data"]["start"], settings["data"].get("end"), refresh=True)
         data_by_ticker[ticker] = add_indicators(data, settings)
     regimes = {}
     for plan_market, benchmark in settings.get("market_regime", {}).get("tickers", {}).items():
         if market in (plan_market, "BOTH"):
-            data, _ = provider.history(benchmark, settings["data"]["start"], settings["data"].get("end"), refresh=True)
+            data, _ = provider.get_historical(benchmark, settings["data"]["start"], settings["data"].get("end"), refresh=True)
             regimes[plan_market] = classify_market_regime(add_indicators(data, settings))
     return build_trade_plans(data_by_ticker, settings, budget, currency, target_return, max_loss, holding_days, market, regimes)
 
@@ -65,6 +65,14 @@ def main() -> None:
         holding_days = st.number_input("Holding period (trading days)", min_value=1, value=10, step=1)
         st.caption("Generate refreshes the current daily dataset before calculating suggestions.")
         generate = st.button("Generate trade plans", type="primary", use_container_width=True)
+
+    with st.expander("Live market data", expanded=False):
+        st.caption("Optional provider quotes only. Trade plans remain based on validated daily historical bars.")
+        if st.button("Refresh live status and quotes"):
+            markets = [market] if market in ("US", "BURSA") else ["US", "BURSA"]
+            st.session_state["live_snapshot"] = pd.concat([live_market_snapshot(settings, item) for item in markets], ignore_index=True)
+        if "live_snapshot" in st.session_state:
+            st.dataframe(st.session_state["live_snapshot"], use_container_width=True, hide_index=True)
 
     if generate:
         try:
