@@ -10,8 +10,10 @@ class BacktestResult:
     rejected_entries: list[str]
 
 
-def run_backtest(data: pd.DataFrame, settings: dict, signal_overrides: pd.Series | None = None) -> BacktestResult:
+def run_backtest(data: pd.DataFrame, settings: dict, signal_overrides: pd.Series | None = None, lot_size: int = 1) -> BacktestResult:
     """Long-only, one-symbol close-to-next-open simulation; signals never trade on their own bar."""
+    if isinstance(lot_size, bool) or not isinstance(lot_size, int) or lot_size < 1:
+        raise ValueError("lot_size must be a positive integer")
     cfg = settings["backtest"]
     cash, shares, entry_cost = float(cfg["initial_cash"]), 0, 0.0
     trades, equity_rows, rejects = [], [], []
@@ -28,12 +30,13 @@ def run_backtest(data: pd.DataFrame, settings: dict, signal_overrides: pd.Series
             budget = min(cash * allocation, cash)
             fill = price * (1 + cfg["slippage_rate"])
             quantity = int(budget / (fill * (1 + cfg["fee_rate"])))
+            quantity -= quantity % lot_size
             # Only information known before this bar opens may approve an entry.
             drawdown = 1 - previous_close_equity / peak if peak else 0
             if drawdown >= cfg["max_drawdown"]:
                 rejects.append(f"{timestamp}: max drawdown reached")
-            elif quantity < 1:
-                rejects.append(f"{timestamp}: insufficient cash for one share")
+            elif quantity < lot_size:
+                rejects.append(f"{timestamp}: insufficient cash for one lot ({lot_size} shares)")
             else:
                 fee = quantity * fill * cfg["fee_rate"]
                 cost = quantity * fill + fee

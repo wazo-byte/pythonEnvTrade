@@ -1,6 +1,6 @@
 # Systematic AI Trading System (research prototype)
 
-This is a small, deterministic **research** system for daily US equity data. It downloads/caches historical OHLCV data, calculates indicators, produces explainable candidate signals, and backtests a long-only baseline with fees and slippage. It does not connect to a broker or send orders.
+This is a small, deterministic **research** system for daily US equity data and optional provider-reported live market monitoring. It downloads/caches historical OHLCV data, calculates indicators, produces explainable candidate signals, and backtests a long-only baseline with fees and slippage. It does not connect to a broker or send orders.
 
 ## Windows / VS Code setup
 
@@ -25,7 +25,9 @@ streamlit run src/trading_system/dashboard.py
 
 Reports appear in `reports/`: `scan.csv`, plus ticker-specific equity, trades, performance, and risk-event CSVs. `backtest --portfolio` uses a shared cash balance for every configured ticker and saves aggregate equity, trade history, per-ticker daily positions, risk events, and a portfolio performance summary. Entries are processed in alphabetical ticker order after exits; this deterministic ordering determines allocation when cash or risk capacity is scarce. Downloaded data are cached under `data/` and ignored by Git. Edit `config/settings.yaml` to change tickers, date range, thresholds, costs, and limits.
 
-`config/settings.yaml` also maps instruments to markets. Market metadata supplies currency and lot size; the bundled US configuration uses USD/one-share lots, while the Bursa placeholder uses MYR/100-share lots. Portfolio values, transaction costs, and P&L are converted to `portfolio.base_currency`. Add a currency under `portfolio.fx_history` with its data ticker and an explicitly verified `invert` setting to use a timestamped FX close series; orders use the prior FX close so they do not use same-day FX closing data. Without a configured history, the fixed `fx_to_base` fallback remains in use. Prices and fees remain in the instrument's local currency in reports, with base-currency fields alongside them.
+`config/settings.yaml` also maps instruments to markets. Market metadata supplies currency and lot size; the bundled US configuration uses USD/one-share lots, while MAYBANK is configured for Bursa as provider symbol `1155`, historical symbol `1155.KL`, MYR, and 100-share lots. Portfolio values, transaction costs, and P&L are converted to `portfolio.base_currency`; portfolio trade prices and fees remain in local currency with base-currency fields alongside them. Add a currency under `portfolio.fx_history` with its data ticker and an explicitly verified `invert` setting to use a timestamped FX close series; orders use the prior FX close so they do not use same-day FX closing data. Without a configured history, the fixed `fx_to_base` fallback remains in use.
+
+Single-ticker `backtest`, walk-forward, and model-backtest runs use that instrument's configured lot size; their cash/equity amounts remain in the instrument's local price currency. Use `backtest --portfolio` for a multi-market simulation valued in the configured base currency with the configured FX conversion.
 
 `backtest --walk-forward` writes `<TICKER>_walk_forward.csv` with separate chronological train, validation, and final test-period results. The strategy settings stay fixed across all three reports: use validation only for a future model or parameter-selection decision, then treat the final test period as untouched.
 
@@ -39,7 +41,7 @@ Reports appear in `reports/`: `scan.csv`, plus ticker-specific equity, trades, p
 
 `journal-close` manually reconciles a journal entry with actual entry/exit prices plus optional MAE, MFE, and review notes. It calculates actual return and win/loss for later performance analysis; it does not query or submit anything to a broker. On first write, older mixed journal layouts are normalized to the current columns and the original is retained as `trade_journal.csv.bak`.
 
-`dashboard.py` provides the same research workflow in a local browser: enter plan constraints, generate ranked suggestions, inspect entry/target/stop/reasons, and close a journal record with outcome notes. Generating a plan refreshes the Yahoo-backed daily data and displays the latest available bar date. It is not a live or execution-grade feed. It only calls the local research modules and has no order-submission path. The close form takes MAE and MFE as percentages: MAE is the worst move from actual entry during the trade (for example `-2.00`), while MFE is the best move (for example `6.00`). The journal stores them as decimals (`-0.02` and `0.06`).
+`dashboard.py` provides the same research workflow in a local browser: enter plan constraints, generate ranked suggestions, inspect entry/target/stop/reasons, and close a journal record with outcome notes. Generating a plan refreshes the Yahoo-backed daily data and displays the historical bar timestamp. Its separate Live market overview requires an explicit refresh, requests only the selected market, and applies a 60-second per-market dashboard cooldown. It displays provider failures as unavailable; it never substitutes historical prices. The live price is a provider-reported last price, not a bid/ask or an execution price. The close form takes MAE and MFE as percentages: MAE is the worst move from actual entry during the trade (for example `-2.00`), while MFE is the best move (for example `6.00`). The journal stores them as decimals (`-0.02` and `0.06`).
 
 ## Model and execution boundaries
 
@@ -49,7 +51,29 @@ Signals are evaluated at a bar's close and filled at the *next* bar's open with 
 
 `yfinance` is used only for exploratory historical data. Yahoo data availability, adjustment methodology, licensing/terms, timeliness, exchange coverage, and suitability for live trading must be verified independently before any production use. Public daily data are not treated as real-time or execution-grade. Missing/invalid price rows are dropped and reported; no prices are imputed.
 
-For optional live quotes, set `FINNHUB_API_KEY` (US) or `ITICK_API_KEY` (Bursa) in the environment, then run `python -m trading_system.main live-quote --ticker AAPL` or `python -m trading_system.main live-quote --ticker MAYBANK`. `market-status --market US` and `market-status --market BURSA` use the same provider boundary. A missing key, missing entitlement, or provider failure is an error; the command never falls back to Yahoo. iTick freshness depends on its returned data-age header and account entitlement, so it is displayed rather than assumed real-time.
+### Optional live market monitoring
+
+Live quotes are a separate data path from daily Yahoo historical bars. They are not inserted into indicators, ML data, trade plans, backtests, journals, or fills. The returned prices are not bid/ask quotes. Provider timestamps are retained and shown in UTC. The dashboard reports the age of that timestamp; this application cannot verify exchange entitlements or any additional feed delay. Finnhub documents a Unix timestamp in its quote example and market-status response; iTick's market-status response includes a provider local time and timezone.
+
+Set credentials only in the terminal or process environment; never put real values in `.env.example`, source control, reports, or logs. The app does not automatically load `.env` files. In a VS Code PowerShell terminal, set variables for that terminal session:
+
+```powershell
+$secure = Read-Host "Finnhub API key (leave blank if unused)" -AsSecureString
+if ($secure.Length -gt 0) {
+    $env:FINNHUB_API_KEY = ([System.Net.NetworkCredential]::new("", $secure)).Password
+}
+$secure = Read-Host "iTick API token (leave blank if unused)" -AsSecureString
+if ($secure.Length -gt 0) {
+    $env:ITICK_API_KEY = ([System.Net.NetworkCredential]::new("", $secure)).Password
+}
+$env:ITICK_API_HOST = Read-Host "iTick HTTPS API host from your account (leave blank if unused)"
+```
+
+Finnhub uses its documented `/api/v1/quote` and `/api/v1/stock/market-status` endpoints. iTick's official REST reference documents `/stock/quote` (`region=MY`, `code=...`, token header; quote fields include `p` and millisecond `t`) and `/market/status` (`code=MY`; status fields include `o`, `s`, `l`, and `z`). Its documentation uses an account-supplied `{apiHost}` placeholder; it does not establish a universal host or a guaranteed free-tier entitlement, so `ITICK_API_HOST` must be copied from the user's iTick account documentation. No host or delay is guessed. See the [Finnhub quote documentation](https://finnhub.io/docs/api/quote), [Finnhub market-status documentation](https://finnhub.io/docs/api/stock-market-status), [iTick quote reference](https://docs.itick.org/en/rest-api/stocks/stock-quote), and [iTick market-status reference](https://docs.itick.org/en/rest-api/basics/market-status).
+
+`MAYBANK`/`1155`/`1155.KL` remains a configured Bursa mapping, not a verified account-entitled iTick instrument: confirm the exact symbol and access with the account's official symbol list before relying on it. Finnhub documents US quote support, but available exchanges, delays, and limits depend on the account; this project does not assert free or execution-grade access.
+
+Run `python -m trading_system.main live-quote --ticker AAPL`, `python -m trading_system.main live-quote --ticker MAYBANK`, `python -m trading_system.main market-status --market US`, or `python -m trading_system.main market-status --market BURSA`. A missing key, host, entitlement, rate limit, invalid response, stale quote, or network failure is surfaced explicitly; live requests never fall back to Yahoo or cache. Freshness labels measure age since the provider's timestamp (recent under 5 minutes, aging 5–15 minutes, stale 15 minutes or older); they do not certify the provider's market-data entitlement or exchange latency.
 
 ## AI and broker roadmap
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import load_settings
+from .config import configured_tickers, instrument_details, load_settings
 from .data import MarketDataGateway
 from .evaluation import walk_forward_baseline
 from .features import chronological_split, make_supervised_dataset
@@ -73,7 +73,7 @@ def main() -> None:
             parser.error("trade-plan requires --budget --currency --target-return --max-loss --market")
         provider = MarketDataGateway(settings)
         datasets = {}
-        for plan_ticker in settings["tickers"]:
+        for plan_ticker in configured_tickers(settings, args.market):
             plan_data, _ = provider.get_historical(plan_ticker, settings["data"]["start"], settings["data"].get("end"))
             datasets[plan_ticker] = add_indicators(plan_data, settings)
         regimes = {}
@@ -129,7 +129,8 @@ def main() -> None:
         return
     if args.command == "model-backtest":
         report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
-        summary, trades, equity = run_model_backtests(add_indicators(data, settings), settings)
+        lot_size = instrument_details(settings, ticker)["lot_size"]
+        summary, trades, equity = run_model_backtests(add_indicators(data, settings), settings, lot_size)
         summary.to_csv(report_dir / f"{ticker}_model_backtest.csv", index=False)
         trades.to_csv(report_dir / f"{ticker}_model_backtest_trades.csv", index=False)
         equity.to_csv(report_dir / f"{ticker}_model_backtest_equity.csv", index=False)
@@ -137,11 +138,12 @@ def main() -> None:
         return
     if args.walk_forward:
         report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
-        report = walk_forward_baseline(add_indicators(data, settings), settings)
+        lot_size = instrument_details(settings, ticker)["lot_size"]
+        report = walk_forward_baseline(add_indicators(data, settings), settings, lot_size)
         report.to_csv(report_dir / f"{ticker}_walk_forward.csv", index=False)
         print(report.to_string(index=False))
         return
-    result = run_backtest(add_indicators(data, settings), settings)
+    result = run_backtest(add_indicators(data, settings), settings, lot_size=instrument_details(settings, ticker)["lot_size"])
     report_dir = Path("reports"); report_dir.mkdir(exist_ok=True)
     result.equity.to_csv(report_dir / f"{ticker}_equity.csv")
     result.trades.to_csv(report_dir / f"{ticker}_trades.csv", index=False)

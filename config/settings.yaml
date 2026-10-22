@@ -1,4 +1,4 @@
-tickers: [AAPL, MSFT, NVDA]
+tickers: [AAPL, MSFT, NVDA, MAYBANK]
 markets:
   US:
     currency: USD

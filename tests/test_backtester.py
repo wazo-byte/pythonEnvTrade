@@ -42,3 +42,42 @@ def test_signal_override_still_fills_on_next_bar():
     settings = {"strategy": {"rsi_min": 40, "rsi_max": 60}, "backtest": {"initial_cash": 1000, "fee_rate": 0, "slippage_rate": 0, "max_position_fraction": .5, "max_portfolio_exposure": .8, "max_positions": 1, "max_drawdown": .9, "daily_loss_limit": .5}}
     result = run_backtest(data, settings, pd.Series(["BUY", "WATCH", "WATCH"], index=index))
     assert result.trades.iloc[0]["timestamp"] == index[1]
+
+
+def test_configured_lot_size_rounds_backtest_orders_down_and_blocks_sub_lot_fills():
+    index = pd.date_range("2024-01-01", periods=4)
+    data = pd.DataFrame(
+        {
+            "Open": [10.0] * 4,
+            "Close": [10.0] * 4,
+            "EMA20": [11.0] * 4,
+            "EMA50": [10.0] * 4,
+            "RSI14": [50.0] * 4,
+            "MACD": [1.0] * 4,
+            "MACDSignal": [0.0] * 4,
+        },
+        index=index,
+    )
+    signals = pd.Series(["BUY", "WATCH", "WATCH", "WATCH"], index=index)
+    settings = {
+        "strategy": {"rsi_min": 40, "rsi_max": 60},
+        "backtest": {
+            "initial_cash": 10000,
+            "fee_rate": 0,
+            "slippage_rate": 0,
+            "max_position_fraction": 0.5,
+            "max_portfolio_exposure": 0.8,
+            "max_positions": 1,
+            "max_drawdown": 0.9,
+            "daily_loss_limit": 0.1,
+        },
+    }
+
+    result = run_backtest(data, settings, signals, lot_size=100)
+    assert result.trades.iloc[0]["quantity"] == 500
+    assert (result.trades["quantity"] % 100 == 0).all()
+
+    settings["backtest"]["initial_cash"] = 1000
+    small_result = run_backtest(data, settings, signals, lot_size=100)
+    assert small_result.trades.empty
+    assert any("one lot (100 shares)" in reason for reason in small_result.rejected_entries)

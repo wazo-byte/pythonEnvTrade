@@ -3,7 +3,7 @@ from .backtester import run_backtest
 from .metrics import performance
 
 
-def walk_forward_baseline(data: pd.DataFrame, settings: dict) -> pd.DataFrame:
+def walk_forward_baseline(data: pd.DataFrame, settings: dict, lot_size: int = 1) -> pd.DataFrame:
     """Evaluate frozen strategy settings on chronological train, validation, and test periods."""
     cfg = settings.get("evaluation", {})
     train_fraction = float(cfg.get("train_fraction", 0.60))
@@ -17,6 +17,6 @@ def walk_forward_baseline(data: pd.DataFrame, settings: dict) -> pd.DataFrame:
     periods = {"train": data.iloc[:train_end], "validation": data.iloc[train_end:validation_end], "test": data.iloc[validation_end:]}
     reports = []
     for name, period in periods.items():
-        result = run_backtest(period, settings)
+        result = run_backtest(period, settings, lot_size=lot_size)
         reports.append({"split": name, "start": period.index[0], "end": period.index[-1], "bars": len(period), **performance(result, period, settings["backtest"]["initial_cash"])})
     return pd.DataFrame(reports)

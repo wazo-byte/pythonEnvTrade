@@ -49,7 +49,7 @@ def run_model_benchmark(data: pd.DataFrame, settings: dict) -> tuple[pd.DataFram
     return pd.DataFrame(summaries), pd.concat(predictions)
 
 
-def run_model_backtests(data: pd.DataFrame, settings: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def run_model_backtests(data: pd.DataFrame, settings: dict, lot_size: int = 1) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Compare train-only model signals with rules under identical costs on held-out periods."""
     horizon = settings.get("ml", {}).get("label_horizon", 5)
     features, labels = make_supervised_dataset(data, horizon)
@@ -60,8 +60,8 @@ def run_model_backtests(data: pd.DataFrame, settings: dict) -> tuple[pd.DataFram
         split_features, _ = splits[name]
         period = data.loc[split_features.index]
         model_signals = model.predict(split_features).map(lambda value: "BUY" if value > 0 else "WATCH")
-        model_result = run_backtest(period, settings, model_signals)
-        rule_result = run_backtest(period, settings)
+        model_result = run_backtest(period, settings, model_signals, lot_size)
+        rule_result = run_backtest(period, settings, lot_size=lot_size)
         model_metrics = performance(model_result, period, settings["backtest"]["initial_cash"])
         rule_metrics = performance(rule_result, period, settings["backtest"]["initial_cash"])
         summaries.append({"split": name, "bars": len(period), "model_total_return": model_metrics["total_return"], "rule_total_return": rule_metrics["total_return"], "buy_hold_return": model_metrics["buy_hold_return"], "model_max_drawdown": model_metrics["max_drawdown"], "rule_max_drawdown": rule_metrics["max_drawdown"], "model_fees_paid": model_metrics["fees_paid"], "rule_fees_paid": rule_metrics["fees_paid"]})
